@@ -19,9 +19,9 @@ jobs:
         run: |
           flutter create --org com.profitcalc --project-name profit_discount_calc temp_project
           cp lib/main.dart temp_project/lib/main.dart
-          sed -i 's/android:label="profit_discount_calc"/android:label="حاسبة الأرباح"/g' temp_project/android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="profit_discount_calc"/android:label="حاسبة الأرباح والخصومات"/g' temp_project/android/app/src/main/AndroidManifest.xml
 
-      - name: Generate Upload Keystore
+      - name: Generate Upload Keystore & Configure Signing
         run: |
           keytool -genkey -v -keystore temp_project/android/app/upload-keystore.jks \
             -keyalg RSA -keysize 2048 -validity 10000 -alias upload \
@@ -34,6 +34,67 @@ jobs:
           keyAlias=upload
           storeFile=upload-keystore.jks
           EOF
+
+          if [ -f temp_project/android/app/build.gradle.kts ]; then
+            cat <<'EOF' > temp_project/android/app/build.gradle.kts
+          import java.util.Properties
+          import java.io.FileInputStream
+
+          plugins {
+              id("com.android.application")
+              id("kotlin-android")
+              id("dev.flutter.flutter-gradle-plugin")
+          }
+
+          val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+          }
+
+          android {
+              namespace = "com.profitcalc.profit_discount_calc"
+              compileSdk = flutter.compileSdkVersion
+              ndkVersion = flutter.ndkVersion
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = JavaVersion.VERSION_17.toString()
+              }
+
+              defaultConfig {
+                  applicationId = "com.profitcalc.profit_discount_calc"
+                  minSdk = flutter.minSdkVersion
+                  targetSdk = flutter.targetSdkVersion
+                  versionCode = flutter.versionCode
+                  versionName = flutter.versionName
+              }
+
+              signingConfigs {
+                  create("release") {
+                      keyAlias = keystoreProperties.getProperty("keyAlias")
+                      keyPassword = keystoreProperties.getProperty("keyPassword")
+                      storeFile = file(keystoreProperties.getProperty("storeFile"))
+                      storePassword = keystoreProperties.getProperty("storePassword")
+                  }
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig = signingConfigs.getByName("release")
+                  }
+              }
+          }
+
+          flutter {
+              source = "../.."
+          }
+          EOF
+          fi
 
       - name: Build App Bundle (AAB)
         working-directory: temp_project
