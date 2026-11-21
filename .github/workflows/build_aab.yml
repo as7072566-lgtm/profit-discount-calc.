@@ -21,103 +21,26 @@ jobs:
           cp lib/main.dart temp_project/lib/main.dart
           sed -i 's/android:label="profit_discount_calc"/android:label="حاسبة الأرباح والخصومات"/g' temp_project/android/app/src/main/AndroidManifest.xml
 
-      - name: Generate Upload Keystore & Configure Signing
+      - name: Generate Upload Keystore
         run: |
           keytool -genkey -v -keystore temp_project/android/app/upload-keystore.jks \
             -keyalg RSA -keysize 2048 -validity 10000 -alias upload \
             -storepass profit123456 -keypass profit123456 \
             -dname "CN=Merchant Tools, OU=Dev, O=MerchantTools, L=Cairo, S=Cairo, C=EG"
 
-          cat <<EOF > temp_project/android/key.properties
-          storePassword=profit123456
-          keyPassword=profit123456
-          keyAlias=upload
-          storeFile=upload-keystore.jks
-          EOF
-
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-
-          kts = Path("temp_project/android/app/build.gradle.kts")
-          groovy = Path("temp_project/android/app/build.gradle")
-
-          if kts.exists():
-              s = kts.read_text(encoding="utf-8")
-              if "import java.util.Properties" not in s:
-                  s = "import java.util.Properties\nimport java.io.FileInputStream\n\n" + s
-              if "val keystoreProperties = Properties()" not in s:
-                  loader = (
-                      'val keystoreProperties = Properties()\n'
-                      'val keystorePropertiesFile = rootProject.file("key.properties")\n'
-                      'if (keystorePropertiesFile.exists()) {\n'
-                      '    keystoreProperties.load(FileInputStream(keystorePropertiesFile))\n'
-                      '}\n\n'
-                  )
-                  s = s.replace("android {", loader + "android {", 1)
-
-              if "signingConfigs {" not in s:
-                  sc = (
-                      '    signingConfigs {\n'
-                      '        create("release") {\n'
-                      '            keyAlias = keystoreProperties.getProperty("keyAlias")\n'
-                      '            keyPassword = keystoreProperties.getProperty("keyPassword")\n'
-                      '            storeFile = file(keystoreProperties.getProperty("storeFile"))\n'
-                      '            storePassword = keystoreProperties.getProperty("storePassword")\n'
-                      '        }\n'
-                      '    }\n\n'
-                  )
-                  s = re.sub(r'(\n\s*buildTypes\s*\{)', sc + r'\1', s, count=1)
-
-              s = re.sub(
-                  r'(release\s*\{)',
-                  r'\1\n            signingConfig = signingConfigs.getByName("release")',
-                  s,
-                  count=1,
-              )
-              kts.write_text(s, encoding="utf-8")
-              print("=== UPDATED build.gradle.kts ===")
-              print(s)
-
-          elif groovy.exists():
-              s = groovy.read_text(encoding="utf-8")
-              if "def keystoreProperties = new Properties()" not in s:
-                  loader = (
-                      "def keystoreProperties = new Properties()\n"
-                      "def keystorePropertiesFile = rootProject.file('key.properties')\n"
-                      "if (keystorePropertiesFile.exists()) {\n"
-                      "    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n"
-                      "}\n\n"
-                  )
-                  s = loader + s
-
-              if "signingConfigs {" not in s:
-                  sc = (
-                      "    signingConfigs {\n"
-                      "        release {\n"
-                      "            keyAlias keystoreProperties['keyAlias']\n"
-                      "            keyPassword keystoreProperties['keyPassword']\n"
-                      "            storeFile file(keystoreProperties['storeFile'])\n"
-                      "            storePassword keystoreProperties['storePassword']\n"
-                      "        }\n"
-                      "    }\n\n"
-                  )
-                  s = re.sub(r'(\n\s*buildTypes\s*\{)', sc + r'\1', s, count=1)
-
-              s = re.sub(
-                  r'(release\s*\{)',
-                  r'\1\n                signingConfig signingConfigs.release',
-                  s,
-                  count=1,
-              )
-              groovy.write_text(s, encoding="utf-8")
-              print("=== UPDATED build.gradle ===")
-              print(s)
-          PY
-
       - name: Build App Bundle (AAB)
         working-directory: temp_project
         run: flutter build appbundle --release
+
+      - name: Sign AAB with Release Keystore
+        run: |
+          AAB="temp_project/build/app/outputs/bundle/release/app-release.aab"
+          zip -d "$AAB" "META-INF/*.SF" "META-INF/*.DSA" "META-INF/*.RSA" "META-INF/*.EC" "META-INF/MANIFEST.MF" || true
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+            -keystore temp_project/android/app/upload-keystore.jks \
+            -storepass profit123456 -keypass profit123456 \
+            "$AAB" upload
+          jarsigner -verify "$AAB"
 
       - name: Upload AAB and Keystore
         uses: actions/upload-artifact@v4
