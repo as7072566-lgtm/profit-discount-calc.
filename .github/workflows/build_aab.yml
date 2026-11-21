@@ -36,6 +36,7 @@ jobs:
           EOF
 
           python3 - <<'PY'
+          import re
           from pathlib import Path
 
           kts = Path("temp_project/android/app/build.gradle.kts")
@@ -45,64 +46,73 @@ jobs:
               s = kts.read_text(encoding="utf-8")
               if "import java.util.Properties" not in s:
                   s = "import java.util.Properties\nimport java.io.FileInputStream\n\n" + s
-              if "keystoreProperties" not in s:
-                  loader = """val keystoreProperties = Properties()
-          val keystorePropertiesFile = rootProject.file("key.properties")
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-          }
-
-          """
-                  s = s.replace("android {", loader + "android {", 1)
-              if "signingConfigs {" not in s and "buildTypes {" in s:
-                  block = """signingConfigs {
-                  create("release") {
-                      keyAlias = keystoreProperties.getProperty("keyAlias")
-                      keyPassword = keystoreProperties.getProperty("keyPassword")
-                      storeFile = file(keystoreProperties.getProperty("storeFile"))
-                      storePassword = keystoreProperties.getProperty("storePassword")
-                  }
-              }
-
-              buildTypes {"""
-                  s = s.replace("buildTypes {", block, 1)
-              if 'signingConfig = signingConfigs.getByName("release")' not in s:
-                  s = s.replace(
-                      "release {",
-                      'release {\n                signingConfig = signingConfigs.getByName("release")',
-                      1,
+              if "val keystoreProperties = Properties()" not in s:
+                  loader = (
+                      'val keystoreProperties = Properties()\n'
+                      'val keystorePropertiesFile = rootProject.file("key.properties")\n'
+                      'if (keystorePropertiesFile.exists()) {\n'
+                      '    keystoreProperties.load(FileInputStream(keystorePropertiesFile))\n'
+                      '}\n\n'
                   )
+                  s = s.replace("android {", loader + "android {", 1)
+
+              if "signingConfigs {" not in s:
+                  sc = (
+                      '    signingConfigs {\n'
+                      '        create("release") {\n'
+                      '            keyAlias = keystoreProperties.getProperty("keyAlias")\n'
+                      '            keyPassword = keystoreProperties.getProperty("keyPassword")\n'
+                      '            storeFile = file(keystoreProperties.getProperty("storeFile"))\n'
+                      '            storePassword = keystoreProperties.getProperty("storePassword")\n'
+                      '        }\n'
+                      '    }\n\n'
+                  )
+                  s = re.sub(r'(\n\s*buildTypes\s*\{)', sc + r'\1', s, count=1)
+
+              s = re.sub(
+                  r'(release\s*\{)',
+                  r'\1\n            signingConfig = signingConfigs.getByName("release")',
+                  s,
+                  count=1,
+              )
               kts.write_text(s, encoding="utf-8")
+              print("=== UPDATED build.gradle.kts ===")
+              print(s)
+
           elif groovy.exists():
               s = groovy.read_text(encoding="utf-8")
-              if "def keystoreProperties" not in s:
-                  loader = """def keystoreProperties = new Properties()
-          def keystorePropertiesFile = rootProject.file('key.properties')
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-          }
-
-          """
-                  s = loader + s
-              if "signingConfigs {" not in s and "buildTypes {" in s:
-                  block = """signingConfigs {
-                  release {
-                      keyAlias keystoreProperties['keyAlias']
-                      keyPassword keystoreProperties['keyPassword']
-                      storeFile file(keystoreProperties['storeFile'])
-                      storePassword keystoreProperties['storePassword']
-                  }
-              }
-
-              buildTypes {"""
-                  s = s.replace("buildTypes {", block, 1)
-              if "signingConfig signingConfigs.release" not in s:
-                  s = s.replace(
-                      "release {",
-                      "release {\n                signingConfig signingConfigs.release",
-                      1,
+              if "def keystoreProperties = new Properties()" not in s:
+                  loader = (
+                      "def keystoreProperties = new Properties()\n"
+                      "def keystorePropertiesFile = rootProject.file('key.properties')\n"
+                      "if (keystorePropertiesFile.exists()) {\n"
+                      "    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n"
+                      "}\n\n"
                   )
+                  s = loader + s
+
+              if "signingConfigs {" not in s:
+                  sc = (
+                      "    signingConfigs {\n"
+                      "        release {\n"
+                      "            keyAlias keystoreProperties['keyAlias']\n"
+                      "            keyPassword keystoreProperties['keyPassword']\n"
+                      "            storeFile file(keystoreProperties['storeFile'])\n"
+                      "            storePassword keystoreProperties['storePassword']\n"
+                      "        }\n"
+                      "    }\n\n"
+                  )
+                  s = re.sub(r'(\n\s*buildTypes\s*\{)', sc + r'\1', s, count=1)
+
+              s = re.sub(
+                  r'(release\s*\{)',
+                  r'\1\n                signingConfig signingConfigs.release',
+                  s,
+                  count=1,
+              )
               groovy.write_text(s, encoding="utf-8")
+              print("=== UPDATED build.gradle ===")
+              print(s)
           PY
 
       - name: Build App Bundle (AAB)
