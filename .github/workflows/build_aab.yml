@@ -35,46 +35,27 @@ jobs:
           storeFile=upload-keystore.jks
           EOF
 
-          if [ -f temp_project/android/app/build.gradle.kts ]; then
-            cat <<'EOF' > temp_project/android/app/build.gradle.kts
-          import java.util.Properties
-          import java.io.FileInputStream
+          python3 - <<'PY'
+          from pathlib import Path
 
-          plugins {
-              id("com.android.application")
-              id("kotlin-android")
-              id("dev.flutter.flutter-gradle-plugin")
-          }
+          kts = Path("temp_project/android/app/build.gradle.kts")
+          groovy = Path("temp_project/android/app/build.gradle")
 
-          val keystoreProperties = Properties()
+          if kts.exists():
+              s = kts.read_text(encoding="utf-8")
+              if "import java.util.Properties" not in s:
+                  s = "import java.util.Properties\nimport java.io.FileInputStream\n\n" + s
+              if "keystoreProperties" not in s:
+                  loader = """val keystoreProperties = Properties()
           val keystorePropertiesFile = rootProject.file("key.properties")
           if (keystorePropertiesFile.exists()) {
               keystoreProperties.load(FileInputStream(keystorePropertiesFile))
           }
 
-          android {
-              namespace = "com.profitcalc.profit_discount_calc"
-              compileSdk = flutter.compileSdkVersion
-              ndkVersion = flutter.ndkVersion
-
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-
-              kotlinOptions {
-                  jvmTarget = JavaVersion.VERSION_17.toString()
-              }
-
-              defaultConfig {
-                  applicationId = "com.profitcalc.profit_discount_calc"
-                  minSdk = flutter.minSdkVersion
-                  targetSdk = flutter.targetSdkVersion
-                  versionCode = flutter.versionCode
-                  versionName = flutter.versionName
-              }
-
-              signingConfigs {
+          """
+                  s = s.replace("android {", loader + "android {", 1)
+              if "signingConfigs {" not in s and "buildTypes {" in s:
+                  block = """signingConfigs {
                   create("release") {
                       keyAlias = keystoreProperties.getProperty("keyAlias")
                       keyPassword = keystoreProperties.getProperty("keyPassword")
@@ -83,18 +64,46 @@ jobs:
                   }
               }
 
-              buildTypes {
-                  release {
-                      signingConfig = signingConfigs.getByName("release")
-                  }
-              }
+              buildTypes {"""
+                  s = s.replace("buildTypes {", block, 1)
+              if 'signingConfig = signingConfigs.getByName("release")' not in s:
+                  s = s.replace(
+                      "release {",
+                      'release {\n                signingConfig = signingConfigs.getByName("release")',
+                      1,
+                  )
+              kts.write_text(s, encoding="utf-8")
+          elif groovy.exists():
+              s = groovy.read_text(encoding="utf-8")
+              if "def keystoreProperties" not in s:
+                  loader = """def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
           }
 
-          flutter {
-              source = "../.."
-          }
-          EOF
-          fi
+          """
+                  s = loader + s
+              if "signingConfigs {" not in s and "buildTypes {" in s:
+                  block = """signingConfigs {
+                  release {
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                      storeFile file(keystoreProperties['storeFile'])
+                      storePassword keystoreProperties['storePassword']
+                  }
+              }
+
+              buildTypes {"""
+                  s = s.replace("buildTypes {", block, 1)
+              if "signingConfig signingConfigs.release" not in s:
+                  s = s.replace(
+                      "release {",
+                      "release {\n                signingConfig signingConfigs.release",
+                      1,
+                  )
+              groovy.write_text(s, encoding="utf-8")
+          PY
 
       - name: Build App Bundle (AAB)
         working-directory: temp_project
